@@ -5,6 +5,12 @@ import { extname, join, relative, sep } from "node:path";
 const TEMPLATE_DIR = ".pi-goals";
 const DEFAULT_COMMAND_TIMEOUT_MS = 10_000;
 const DEFAULT_COMMAND_OUTPUT_LIMIT = 20_000;
+const TEMPLATE_COMMAND_POLICY_ENV = "PI_GOALS_TEMPLATE_COMMANDS";
+const DEFAULT_TEMPLATE_COMMAND_POLICY: TemplateCommandPolicy = "off";
+const ALLOWLISTED_COMMANDS = ["git", "rg"];
+const SHELL_CHAIN_META_PATTERN = /[;&|`$<>\\\n\r]/;
+
+type TemplateCommandPolicy = "off" | "allowlist" | "on";
 
 export type GoalTemplate = {
 	name: string;
@@ -201,14 +207,29 @@ function parseFlags(input: string): Record<string, string> {
 }
 
 function interpolate(text: string, values: Record<string, string>): string {
-	return text.replace(/\{\{\s*([A-Za-z0-9_-]+)\s*\}\}/g, (_match, key: string) => {
-		if (values[key] === undefined) throw new Error(`Missing template value for {{${key}}}.`);
-		return values[key];
+	return text.replace(/\{\{\s*([A-Za-z0-9_-]+)(?:\s+([A-Za-z0-9_-]+))?\s*\}\}/g, (_match, first: string, second: string | undefined) => {
+		if (second === undefined) {
+			if (values[first] === undefined) throw new Error(`Missing template value for {{${first}}}.`);
+			return values[first];
+		}
+		if (values[second] === undefined) throw new Error(`Missing template value for {{${second}}}.`);
+		return applyInterpolationHelper(first, values[second]);
 	});
 }
 
+function applyInterpolationHelper(helper: string, value: string): string {
+	if (helper === "shell_quote") return shellQuote(value);
+	if (helper === "json") return JSON.stringify(value);
+	if (helper === "heredoc") return value.replace(/\r\n/g, "\n");
+	throw new Error(`Unknown template interpolation helper '${helper}'.`);
+}
+
+function shellQuote(value: string): string {
+	return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 function findRequiredPlaceholders(text: string): string[] {
-	return Array.from(text.matchAll(/\{\{\s*([A-Za-z0-9_-]+)\s*\}\}/g), (match) => match[1])
+	return Array.from(text.matchAll(/\{\{\s*(?:(?:shell_quote|json|heredoc)\s+)?([A-Za-z0-9_-]+)\s*\}\}/g), (match) => match[1])
 		.filter((placeholder, index, all) => all.indexOf(placeholder) === index)
 		.sort();
 }
@@ -216,8 +237,30 @@ function findRequiredPlaceholders(text: string): string[] {
 function resolveInlineCommands(text: string, template: GoalTemplate, cwd: string): string {
 	return text.replace(/!`([^`]+)`/g, (_match, command: string) => {
 		if (!template.allowCommands) throw new Error(`Template ${template.name} uses inline commands but allow_commands is not true.`);
+		const policy = templateCommandPolicy();
+		if (policy === "off") {
+			throw new Error(`Template ${template.name} uses inline commands but template command execution is disabled. Set ${TEMPLATE_COMMAND_POLICY_ENV}=allowlist or ${TEMPLATE_COMMAND_POLICY_ENV}=on to opt in.`);
+		}
+		if (policy === "allowlist") validateAllowlistedCommand(command, template.name);
 		return runCommand(command, template, cwd);
 	});
+}
+
+function templateCommandPolicy(): TemplateCommandPolicy {
+	const value = process.env[TEMPLATE_COMMAND_POLICY_ENV];
+	return value === "allowlist" || value === "on" || value === "off" ? value : DEFAULT_TEMPLATE_COMMAND_POLICY;
+}
+
+function validateAllowlistedCommand(command: string, templateName: string): void {
+	const trimmed = command.trim();
+	if (!trimmed) throw new Error(`Inline command failed allowlist policy in template ${templateName}: empty command.`);
+	if (SHELL_CHAIN_META_PATTERN.test(trimmed)) {
+		throw new Error(`Inline command failed allowlist policy in template ${templateName}: shell metacharacters are not allowed in allowlist mode.`);
+	}
+	const commandName = trimmed.split(/\s+/, 1)[0];
+	if (!ALLOWLISTED_COMMANDS.includes(commandName)) {
+		throw new Error(`Inline command failed allowlist policy in template ${templateName}: '${commandName}' is not allowlisted.`);
+	}
 }
 
 function runCommand(command: string, template: GoalTemplate, cwd: string): string {

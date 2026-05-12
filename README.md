@@ -195,6 +195,35 @@ Template features:
 
 Reusable templates are available to both slash commands and natural-language agent workflows. Agents can discover available templates, fill in required values from your request, and create a concrete goal from the resolved prompt. Template invocations also work through `/goal queue`.
 
+### Hardened template command policy
+
+This hardened copy disables inline template shell commands by default, even when a template says `allow_commands: true`. To opt in, set `PI_GOALS_TEMPLATE_COMMANDS` before running Pi:
+
+```bash
+# Default: inline !`command` snippets are blocked
+PI_GOALS_TEMPLATE_COMMANDS=off
+
+# Allow only simple allowlisted commands such as git/rg with no shell metacharacters
+PI_GOALS_TEMPLATE_COMMANDS=allowlist
+
+# Compatibility mode: run allow_commands templates as the original project did
+PI_GOALS_TEMPLATE_COMMANDS=on
+```
+
+Template authors can use safer interpolation helpers instead of raw `{{args}}` in shell snippets:
+
+```markdown
+{{shell_quote args}}  # POSIX single-quoted value
+{{json args}}         # JSON string literal
+{{heredoc args}}      # normalized multiline text for heredoc-style usage
+```
+
+Prefer `allowlist` or `off` for untrusted workspaces. Use `on` only for templates you have reviewed as trusted code.
+
+### Monitor privacy controls
+
+The churn monitor still runs with no tools, no extensions, no skills, and no prompt templates, but this copy also redacts common secret-like values from the recent session summaries it sends to the monitor prompt. Set `PI_GOALS_MONITOR_ENABLED=false` to disable the background monitor entirely.
+
 ## This repository as a reference
 
 This repository is both the source for the `pi-goals` Pi extension and a working reference for how the maintainer uses `pi-goals` in real project work. The source repo intentionally includes:

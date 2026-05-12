@@ -1,5 +1,18 @@
 # Changelog
 
+## Hardened local copy - Unreleased
+
+### Changed
+
+- Inline template shell commands are disabled by default and require `PI_GOALS_TEMPLATE_COMMANDS=allowlist` or `PI_GOALS_TEMPLATE_COMMANDS=on`.
+- Added safer template interpolation helpers: `{{shell_quote name}}`, `{{json name}}`, and `{{heredoc name}}`.
+- Monitor reports redact common secret-like values from recent session summaries before building the monitor prompt.
+- The background churn monitor can be disabled with `PI_GOALS_MONITOR_ENABLED=false`.
+
+### Added
+
+- `npm run security:goal` regression probe for blocked template command execution, allowlist rejection, safe interpolation helpers, and monitor redaction.
+
 ## 0.3.1 - 2026-05-11
 
 ### Highlights

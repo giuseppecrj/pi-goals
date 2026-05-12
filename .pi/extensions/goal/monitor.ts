@@ -17,6 +17,7 @@ import { notifyWarning } from "./ui";
 import type { GoalMonitorConfidence, GoalMonitorDecision, GoalMonitorReport } from "./types";
 
 const DECISION_ROOT = "churn_monitor_decision";
+const MONITOR_ENABLED_ENV = "PI_GOALS_MONITOR_ENABLED";
 
 type PendingMonitor = {
 	goalId: string;
@@ -26,6 +27,10 @@ type PendingMonitor = {
 let pendingMonitor: PendingMonitor | undefined;
 
 export function scheduleGoalMonitor(pi: ExtensionAPI, ctx: ExtensionContext): void {
+	if (!goalMonitorEnabled()) {
+		cancelGoalMonitor(undefined, "disabled");
+		return;
+	}
 	const goal = getGoal();
 	if (!goal || goal.status !== "active") {
 		cancelGoalMonitor(goal?.goalId, "inactive");
@@ -189,6 +194,10 @@ function monitorEscalationText(decision: GoalMonitorDecision): string {
 
 function monitorSessionPath(cwd: string, goalId: string): string {
 	return join(cwd, ".pi", "goal-monitor", "sessions", `pi-goal-monitor-${goalId}.jsonl`);
+}
+
+function goalMonitorEnabled(): boolean {
+	return process.env[MONITOR_ENABLED_ENV] !== "false" && process.env[MONITOR_ENABLED_ENV] !== "0";
 }
 
 async function safelyRun(task: () => Promise<void>): Promise<void> {

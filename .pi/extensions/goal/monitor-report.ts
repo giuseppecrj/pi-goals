@@ -8,6 +8,12 @@ import { evaluateCompletionFloor } from "./floor";
 import { getLastMonitorReportAt, getRecentMonitorLogs, noteMonitorReportSent } from "./monitor-state";
 import type { GoalMonitorFloorReport, GoalMonitorRecentEntry, GoalMonitorReport, GoalState, GoalTelemetrySnapshot } from "./types";
 
+const SECRET_REDACTION_PATTERNS = [
+	/\b((?:[A-Z][A-Z0-9_]*?(?:API_)?(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\s*=\s*)([^\s'"`]+)/gi,
+	/\b(sk-[A-Za-z0-9_-]{10,})\b/g,
+	/\b(xox[baprs]-[A-Za-z0-9-]{10,})\b/g,
+];
+
 export function buildGoalMonitorReport(ctx: ExtensionContext, goal: GoalState, telemetry: GoalTelemetrySnapshot | null, now = Date.now()): GoalMonitorReport {
 	const lastSentAt = getLastMonitorReportAt(goal.goalId);
 	const branch = ctx.sessionManager.getBranch();
@@ -99,8 +105,16 @@ function textFromContentBlock(block: unknown): string {
 }
 
 function trimSummary(value: string): string {
-	const normalized = value.replace(/\s+/g, " ").trim();
+	const normalized = redactSensitiveText(value).replace(/\s+/g, " ").trim();
 	return normalized.length > GOAL_MONITOR_ENTRY_SUMMARY_CHARS ? `${normalized.slice(0, GOAL_MONITOR_ENTRY_SUMMARY_CHARS)}…` : normalized;
+}
+
+function redactSensitiveText(value: string): string {
+	return SECRET_REDACTION_PATTERNS.reduce((text, pattern) => text.replace(pattern, redactPatternMatch), value);
+}
+
+function redactPatternMatch(match: string, prefix?: string): string {
+	return prefix ? `${prefix}[REDACTED]` : "[REDACTED]";
 }
 
 function stringField(value: unknown, fallback: string): string {
