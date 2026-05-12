@@ -1,24 +1,28 @@
 {
-  "name": "pi-goals",
+  "name": "@atlas.labs/pi-goal",
   "version": "0.3.1",
   "description": "Persistent goal tracking for Pi with /tree-compatible state, budgets, reusable prompts, and churn monitoring.",
   "main": ".pi/extensions/goal/index.ts",
   "files": [
     ".pi/extensions/goal/*.ts",
-    ".ai/validation/security-hardening-probe.mjs",
+    "docs/**/*.md",
+    "examples/**/*",
+    "scripts/validation/security-hardening-probe.mjs",
     "README.md",
-    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
     "typecheck:goal": "tsc --noEmit --target ES2022 --module ESNext --moduleResolution node --ignoreDeprecations 6.0 --types node --strict --skipLibCheck .pi/extensions/goal/*.ts",
     "slop:goal": "if rg -n 'as unknown as|as any' .pi/extensions/goal; then exit 1; else exit 0; fi",
-    "security:goal": "node .ai/validation/security-hardening-probe.mjs",
-    "quality:goal": "sentrux gate .pi/extensions/goal && sentrux check .pi/extensions/goal && npm run slop:goal && npm run security:goal && npm run typecheck:goal && pi --offline --no-session --no-tools -e .pi/extensions/goal/index.ts --list-models >/tmp/pi-goal-quality-load.txt"
+    "security:goal": "node scripts/validation/security-hardening-probe.mjs",
+    "quality:goal": "npm run slop:goal && npm run security:goal && npm run typecheck:goal && pi --offline --no-session --no-tools -e .pi/extensions/goal/index.ts --list-models >/tmp/pi-goal-quality-load.txt",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "npm run quality:goal && changeset publish"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/transcendr/pi-goals.git"
+    "url": "git+https://github.com/giuseppecrj/pi-goals.git"
   },
   "keywords": [
     "pi",
@@ -40,10 +44,16 @@
     "access": "public"
   },
   "bugs": {
-    "url": "https://github.com/transcendr/pi-goals/issues"
+    "url": "https://github.com/giuseppecrj/pi-goals/issues"
   },
-  "homepage": "https://github.com/transcendr/pi-goals#readme",
+  "homepage": "https://github.com/giuseppecrj/pi-goals#readme",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "@earendil-works/pi-coding-agent": "^0.74.0",
     "@earendil-works/pi-tui": "^0.74.0",
     "@types/node": "^25.6.2",
