@@ -1,3 +1,0 @@
-## pre-refinement progress invariant probe
-$ python3 - <<PY
-FAIL widget_no_progress_render_yet

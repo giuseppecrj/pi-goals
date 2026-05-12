@@ -6,7 +6,7 @@ Persistent goal tracking for [Pi](https://www.npmjs.com/package/@earendil-works/
 
 ## What's new
 
-Bounded reusable prompt discovery keeps `/goal` autocomplete responsive in large workspaces, and active goals now resume safely after Pi compaction. See the [changelog](CHANGELOG.md) for details.
+Bounded reusable prompt discovery keeps `/goal` autocomplete responsive in large workspaces, and active goals now resume safely after Pi compaction.
 
 ## Features
 
@@ -14,7 +14,7 @@ Bounded reusable prompt discovery keeps `/goal` autocomplete responsive in large
 - Goal state that survives reloads, compaction, and `/tree` navigation.
 - Time and token budgets with goal-aware continuation and wrap-up behavior.
 - Optional completion floors that prevent premature wrap-up until minimum goal-directed work has happened.
-- Reusable token-aware prompt templates from bounded `.pi-goals/` and `.ai/.pi-goals/` directories.
+- Reusable token-aware prompt templates from the bounded `.pi-goals/` directory.
 - Durable FIFO goal queue for sequential goal work.
 - Agent-friendly queue controls for listing, enqueuing, starting, dequeuing, and removing queued goals.
 - Natural-language reusable prompt discovery, so agents can turn project workflows into concrete goals.
@@ -27,13 +27,13 @@ Bounded reusable prompt discovery keeps `/goal` autocomplete responsive in large
 Install globally for your Pi environment:
 
 ```bash
-pi install npm:pi-goals
+pi install npm:@atlas.labs/pi-goal
 ```
 
 Install project-locally:
 
 ```bash
-pi install -l npm:pi-goals
+pi install -l npm:@atlas.labs/pi-goal
 ```
 
 ## Suggested AGENTS.md
@@ -43,7 +43,7 @@ Without prior context, the agent sometimes won't automatically route natural lan
 ```
 ## Goal queue prompt routing
 
-When handling queued pi-goal prose, treat `.ai/.pi-goals/*` as reusable workflows. Before `start_queued_goal` for an abstract/task-type queue item, call `list_goal_templates` and match by name, aliases, description, and placeholders. If exactly one template fits and inputs are available, use `create_goal_from_template`; dequeue the prose item only after that concrete goal is satisfied. Use `start_queued_goal` only for direct one-off goals.
+When handling queued pi-goal prose, treat `.pi-goals/*` as reusable workflows. Before `start_queued_goal` for an abstract/task-type queue item, call `list_goal_templates` and match by name, aliases, description, and placeholders. If exactly one template fits and inputs are available, use `create_goal_from_template`; dequeue the prose item only after that concrete goal is satisfied. Use `start_queued_goal` only for direct one-off goals.
 
 Never discard queued work. Do not call `dequeue_goal` unless the queue head is actually satisfied or the user explicitly authorizes removing that specific queued item. If uncertain, leave it queued and report the blocker.
 ```
@@ -131,7 +131,7 @@ queue up this goal stack pls:
 7. report on the full goal stack and release readiness status (ready to push, ready to publish) when done
 ```
 
-> NOTE: when I mention tags like `deslop-pipeline`, those are references to dynamic goal templates. You can create a `.pi-goals` directory in your project and place your goal templates inside. See [these examples](.ai/.pi-goals) for a good starting point for how `pi-goals` goal templates work. Point your agent at this repo and these examples to have your agent create its own.
+> NOTE: when I mention tags like `deslop-pipeline`, those are references to dynamic goal templates. You can create a `.pi-goals` directory in your project and place your goal templates inside. See [these examples](examples/pi-goals) for a good starting point for how `pi-goals` goal templates work. The examples are not auto-discovered from `examples/`; copy/adapt the `.md` files you want into your workspace-root `.pi-goals/` directory. If an example calls `.pi-goals/scripts/...`, also copy the matching helper from `examples/pi-goals/scripts/` to `.pi-goals/scripts/`.
 
 Agents can manage the queue just like individual goals from natural language: list queued work, add items, start the next direct goal, or remove a queue item after it is satisfied.
 
@@ -153,14 +153,12 @@ These ergonomics will improve soon!
 
 ## Reusable `.pi-goals` prompts
 
-`pi-goals` can turn project prompt templates into reusable goal objectives. Put Markdown, `.markdown`, or `.txt` templates under one of the bounded template directories at your workspace root:
+`pi-goals` can turn project prompt templates into reusable goal objectives. Put Markdown, `.markdown`, or `.txt` templates under the bounded template directory at your workspace root:
 
 ```text
 .pi-goals/
   fix-issue.md
   release/checklist.md
-.ai/.pi-goals/
-  create-issue-doc.md
 ```
 
 `pi-goals` intentionally checks only these root-level template directories instead of recursively searching the whole workspace. This keeps `/goal` autocomplete responsive when Pi is started from large folders such as a home directory.
@@ -195,6 +193,28 @@ Template features:
 
 Reusable templates are available to both slash commands and natural-language agent workflows. Agents can discover available templates, fill in required values from your request, and create a concrete goal from the resolved prompt. Template invocations also work through `/goal queue`.
 
+### Optional OpenSpec workflow templates
+
+`pi-goals` pairs well with [OpenSpec](https://github.com/open-spec/openspec)-style change workflows: OpenSpec remains the source of truth for proposal/design/spec/tasks/archive state, while `pi-goals` provides the persistent execution contract, queueing, budgets, and completion discipline.
+
+This package does not require OpenSpec at runtime. If your project uses OpenSpec, copy/adapt these example templates into workspace-root `.pi-goals/`:
+
+```text
+examples/pi-goals/openspec-propose.md        -> .pi-goals/openspec-propose.md
+examples/pi-goals/openspec-apply-change.md  -> .pi-goals/openspec-apply-change.md
+examples/pi-goals/openspec-archive-change.md -> .pi-goals/openspec-archive-change.md
+```
+
+Then invoke them as reusable goals:
+
+```text
+/goal openspec-propose -- add audit logging to admin actions
+/goal openspec-apply-change --change add-audit-logging
+/goal openspec-archive-change --change add-audit-logging
+```
+
+A useful pattern is to queue the lifecycle: propose the change, apply it, then archive it only after OpenSpec and project validation pass.
+
 ### Hardened template command policy
 
 This hardened copy disables inline template shell commands by default, even when a template says `allow_commands: true`. To opt in, set `PI_GOALS_TEMPLATE_COMMANDS` before running Pi:
@@ -203,7 +223,7 @@ This hardened copy disables inline template shell commands by default, even when
 # Default: inline !`command` snippets are blocked
 PI_GOALS_TEMPLATE_COMMANDS=off
 
-# Allow only simple allowlisted commands such as git/rg with no shell metacharacters
+# Allow only simple allowlisted commands such as git with no shell metacharacters
 PI_GOALS_TEMPLATE_COMMANDS=allowlist
 
 # Compatibility mode: run allow_commands templates as the original project did
@@ -226,12 +246,10 @@ The churn monitor still runs with no tools, no extensions, no skills, and no pro
 
 ## This repository as a reference
 
-This repository is both the source for the `pi-goals` Pi extension and a working reference for how the maintainer uses `pi-goals` in real project work. The source repo intentionally includes:
+This repository is both the source for the `pi-goals` Pi extension and a working reference for reusable goal workflows. The source repo intentionally includes:
 
-- reusable goal templates in [`.ai/.pi-goals/`](.ai/.pi-goals/), including release review, issue workflow, queue-stack, and deslop examples;
-- issue docs in [`.ai/issues/`](.ai/issues/) that show how larger goal-driven changes are planned;
-- issue workflow artifacts in [`.ai/docs/issue-workflow/`](.ai/docs/issue-workflow/) that show the evidence, design choices, and handoffs produced while working those goals;
-- a [prompt template authoring guide](.ai/docs/prompt-template-authoring.md) for creating strong project-local goal templates.
+- reusable goal template examples in [`examples/pi-goals/`](examples/pi-goals/), including release review, issue workflow, queue-stack, and deslop examples. Copy/adapt these into `.pi-goals/`; templates that use helper scripts also need their matching `examples/pi-goals/scripts/` files copied to `.pi-goals/scripts/`;
+- a [prompt template authoring guide](docs/prompt-template-authoring.md) for creating strong project-local goal templates.
 
 If you want to build your own reusable goal workflows, point your agent at the authoring guide and nearby templates, then ask it to adapt the patterns to your project rather than copying them blindly.
 
@@ -262,9 +280,7 @@ npm install
 npm run quality:goal
 ```
 
-`npm run quality:goal` runs the project quality gate for the extension, including [Sentrux](https://github.com/sentrux/sentrux) structure checks, TypeScript validation, and Pi extension load validation.
-
-Development quality checks require the `sentrux` CLI to be available on `PATH`.
+`npm run quality:goal` runs the reproducible package gate for the extension: slop/security probes, TypeScript validation, and Pi extension load validation.
 
 ## Status
 

@@ -1,3 +1,0 @@
-## issue structural and artifact-link probes
-$ python3 structural probe
-PASS issue011_structural_probe required_signals=9 linked_artifacts=7
