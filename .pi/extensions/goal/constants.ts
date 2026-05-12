@@ -1,4 +1,5 @@
 export const STATE_ENTRY_TYPE = "pi-goal-state";
+export const QUEUE_STATE_ENTRY_TYPE = "pi-goal-queue-state";
 export const CONTINUATION_MESSAGE_TYPE = "pi-goal-continuation";
 export const BUDGET_LIMIT_MESSAGE_TYPE = "pi-goal-budget-limit";
 export const PAUSE_MESSAGE_TYPE = "pi-goal-pause";

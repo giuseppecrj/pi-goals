@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { STATE_ENTRY_TYPE } from "./constants";
+import { QUEUE_STATE_ENTRY_TYPE } from "./constants";
 
 export type QueuedGoal = {
 	queueId: string;
@@ -60,7 +60,7 @@ function generateQueueId(): string {
 }
 
 export function getQueue(): QueuedGoal[] {
-	return runtimeQueue;
+	return runtimeQueue.slice();
 }
 
 export function enqueueGoal(objective: string, source: "command" | "tool", opts?: { tokenBudget?: number; timeBudgetSeconds?: number; minTokensBeforeWrapUp?: number; minTimeSecondsBeforeWrapUp?: number; template?: string; templateFlags?: Record<string, string>; templateArgs?: string }): QueuedGoal {
@@ -103,19 +103,19 @@ export function replayQueueState(ctx: { sessionManager: { getBranch(): unknown[]
 }
 
 export function setQueueForTests(state: GoalQueueRuntimeState): void {
-	runtimeQueue = state.queue;
+	runtimeQueue = state.queue.slice();
 }
 
 export function persistEnqueue(pi: ExtensionAPI, goal: QueuedGoal): void {
-	pi.appendEntry(STATE_ENTRY_TYPE, { version: 1, kind: "enqueue", queueId: goal.queueId, goal, reason: "enqueue", at: Date.now() } as GoalQueueEvent);
+	pi.appendEntry(QUEUE_STATE_ENTRY_TYPE, { version: 1, kind: "enqueue", queueId: goal.queueId, goal, reason: "enqueue", at: Date.now() } as GoalQueueEvent);
 }
 
 export function persistDequeue(pi: ExtensionAPI, reason: string, metadata: DequeuePersistMetadata = {}): void {
-	pi.appendEntry(STATE_ENTRY_TYPE, { version: 1, kind: "dequeue", queueId: metadata.queueId, reason, rationale: metadata.audit?.rationale, authority: metadata.audit?.authority, at: Date.now() } as GoalQueueEvent);
+	pi.appendEntry(QUEUE_STATE_ENTRY_TYPE, { version: 1, kind: "dequeue", queueId: metadata.queueId, reason, rationale: metadata.audit?.rationale, authority: metadata.audit?.authority, at: Date.now() } as GoalQueueEvent);
 }
 
 export function persistRemove(pi: ExtensionAPI, queueId: string, reason: string): void {
-	pi.appendEntry(STATE_ENTRY_TYPE, { version: 1, kind: "remove", queueId, reason, at: Date.now() } as GoalQueueEvent);
+	pi.appendEntry(QUEUE_STATE_ENTRY_TYPE, { version: 1, kind: "remove", queueId, reason, at: Date.now() } as GoalQueueEvent);
 }
 
 function entryToQueueEvent(entry: unknown): GoalQueueEvent | null {
@@ -129,7 +129,7 @@ function entryToQueueEvent(entry: unknown): GoalQueueEvent | null {
 function toQueueEventRecord(entry: unknown): QueueEventRecord | null {
 	if (typeof entry !== "object" || entry === null) return null;
 	const candidate = entry as Record<string, unknown>;
-	if (candidate.type !== "custom" || candidate.customType !== STATE_ENTRY_TYPE) return null;
+	if (candidate.type !== "custom" || candidate.customType !== QUEUE_STATE_ENTRY_TYPE) return null;
 	const data = candidate.data;
 	if (typeof data !== "object" || data === null) return null;
 	const raw = data as Record<string, unknown>;

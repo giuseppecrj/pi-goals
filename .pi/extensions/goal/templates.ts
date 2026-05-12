@@ -7,8 +7,9 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 10_000;
 const DEFAULT_COMMAND_OUTPUT_LIMIT = 20_000;
 const TEMPLATE_COMMAND_POLICY_ENV = "PI_GOALS_TEMPLATE_COMMANDS";
 const DEFAULT_TEMPLATE_COMMAND_POLICY: TemplateCommandPolicy = "off";
-const ALLOWLISTED_COMMANDS = ["git", "rg"];
+const ALLOWLISTED_COMMANDS = ["git"];
 const SHELL_CHAIN_META_PATTERN = /[;&|`$<>\\\n\r]/;
+const GIT_UNSAFE_ARG_PATTERN = /^(?:-c|--config(?:=.*)?|--exec-path(?:=.*)?|--upload-pack(?:=.*)?|--receive-pack(?:=.*)?|--git-dir(?:=.*)?|--work-tree(?:=.*)?)$/;
 
 type TemplateCommandPolicy = "off" | "allowlist" | "on";
 
@@ -107,7 +108,7 @@ function findTemplates(nameOrAlias: string, root: string): GoalTemplate[] {
 }
 
 function findTemplateDirs(root: string): string[] {
-	return [join(root, TEMPLATE_DIR), join(root, ".ai", TEMPLATE_DIR)].filter(isDirectory);
+	return [join(root, TEMPLATE_DIR)].filter(isDirectory);
 }
 
 function isDirectory(path: string): boolean {
@@ -252,25 +253,68 @@ function templateCommandPolicy(): TemplateCommandPolicy {
 }
 
 function validateAllowlistedCommand(command: string, templateName: string): void {
+	const parsed = parseAllowlistedCommand(command, templateName);
+	if (!ALLOWLISTED_COMMANDS.includes(parsed.commandName)) {
+		throw new Error(`Inline command failed allowlist policy in template ${templateName}: '${parsed.commandName}' is not allowlisted.`);
+	}
+	if (parsed.commandName === "git") validateGitAllowlistedArgs(parsed.args, templateName);
+}
+
+function parseAllowlistedCommand(command: string, templateName: string): { commandName: string; args: string[] } {
 	const trimmed = command.trim();
 	if (!trimmed) throw new Error(`Inline command failed allowlist policy in template ${templateName}: empty command.`);
 	if (SHELL_CHAIN_META_PATTERN.test(trimmed)) {
 		throw new Error(`Inline command failed allowlist policy in template ${templateName}: shell metacharacters are not allowed in allowlist mode.`);
 	}
-	const commandName = trimmed.split(/\s+/, 1)[0];
-	if (!ALLOWLISTED_COMMANDS.includes(commandName)) {
-		throw new Error(`Inline command failed allowlist policy in template ${templateName}: '${commandName}' is not allowlisted.`);
+	const tokens = splitCommandTokens(trimmed, templateName);
+	const commandName = tokens[0];
+	if (!commandName) throw new Error(`Inline command failed allowlist policy in template ${templateName}: empty command.`);
+	return { commandName, args: tokens.slice(1) };
+}
+
+function validateGitAllowlistedArgs(args: string[], templateName: string): void {
+	for (const arg of args) {
+		if (GIT_UNSAFE_ARG_PATTERN.test(arg) || arg.startsWith("-c") || arg.includes("alias.")) {
+			throw new Error(`Inline command failed allowlist policy in template ${templateName}: unsafe git argument '${arg}'.`);
+		}
 	}
 }
 
+function splitCommandTokens(input: string, templateName: string): string[] {
+	const tokens: string[] = [];
+	let current = "";
+	let quote: '"' | "'" | undefined;
+	for (const char of input) {
+		if (quote) {
+			if (char === quote) quote = undefined;
+			else current += char;
+			continue;
+		}
+		if (char === '"' || char === "'") {
+			quote = char;
+			continue;
+		}
+		if (/\s/.test(char)) {
+			if (current) {
+				tokens.push(current);
+				current = "";
+			}
+			continue;
+		}
+		current += char;
+	}
+	if (quote) throw new Error(`Inline command failed allowlist policy in template ${templateName}: unterminated quote.`);
+	if (current) tokens.push(current);
+	return tokens;
+}
+
 function runCommand(command: string, template: GoalTemplate, cwd: string): string {
+	const policy = templateCommandPolicy();
+	const executable = policy === "allowlist" ? parseAllowlistedCommand(command, template.name) : undefined;
 	try {
-		const output = execFileSync("/bin/bash", ["-lc", command], {
-			cwd,
-			encoding: "utf8",
-			timeout: template.commandTimeoutMs,
-			maxBuffer: template.commandOutputLimit + 1024,
-		});
+		const output = executable
+			? execFileSync(executable.commandName, executable.args, { cwd, encoding: "utf8", timeout: template.commandTimeoutMs, maxBuffer: template.commandOutputLimit + 1024 })
+			: execFileSync("/bin/bash", ["-lc", command], { cwd, encoding: "utf8", timeout: template.commandTimeoutMs, maxBuffer: template.commandOutputLimit + 1024 });
 		return output.length > template.commandOutputLimit ? `${output.slice(0, template.commandOutputLimit)}\n[output truncated]` : output;
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);

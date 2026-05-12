@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { STATE_ENTRY_TYPE, STATE_EVENT_VERSION } from "./constants";
+import { MAX_OBJECTIVE_CHARS, STATE_ENTRY_TYPE, STATE_EVENT_VERSION } from "./constants";
 import { isTelemetry } from "./telemetry";
 import type { GoalRuntimeState, GoalState, GoalTelemetrySnapshot, MutationResult, PiGoalEventReason, PiGoalStateEvent } from "./types";
 
@@ -144,22 +144,54 @@ function entryToGoalEvent(entry: unknown): PiGoalStateEvent | null {
 function isGoalEvent(value: unknown): value is PiGoalStateEvent {
 	if (typeof value !== "object" || value === null) return false;
 	const v = value as Record<string, unknown>;
-	return v.version === STATE_EVENT_VERSION && typeof v.kind === "string" && typeof v.reason === "string";
+	return v.version === STATE_EVENT_VERSION && isGoalEventKind(v.kind) && isGoalEventReason(v.reason);
 }
 
 function toGoalState(value: unknown): GoalState | null {
 	if (typeof value !== "object" || value === null) return null;
 	const v = value as Record<string, unknown>;
-	if (typeof v.goalId !== "string" || typeof v.objective !== "string" || typeof v.status !== "string") return null;
-	const minTokensBeforeWrapUp = optionalPositiveInteger(v.minTokensBeforeWrapUp);
-	const minTimeSecondsBeforeWrapUp = optionalPositiveInteger(v.minTimeSecondsBeforeWrapUp);
-	return {
-		...(v as GoalState),
-		minTokensBeforeWrapUp,
-		minTimeSecondsBeforeWrapUp,
-	};
+	const goalId = requiredString(v.goalId);
+	const objective = requiredString(v.objective);
+	const status = goalStatus(v.status);
+	const tokensUsed = nonNegativeInteger(v.tokensUsed);
+	const timeUsedSeconds = nonNegativeInteger(v.timeUsedSeconds);
+	const createdAt = finiteTimestamp(v.createdAt);
+	const updatedAt = finiteTimestamp(v.updatedAt);
+	if (!goalId || !objective || [...objective].length > MAX_OBJECTIVE_CHARS || !status || tokensUsed === undefined || timeUsedSeconds === undefined || createdAt === undefined || updatedAt === undefined) return null;
+	const tokenBudget = optionalPositiveIntegerField(v.tokenBudget);
+	const timeBudgetSeconds = optionalPositiveIntegerField(v.timeBudgetSeconds);
+	const minTokensBeforeWrapUp = optionalPositiveIntegerField(v.minTokensBeforeWrapUp);
+	const minTimeSecondsBeforeWrapUp = optionalPositiveIntegerField(v.minTimeSecondsBeforeWrapUp);
+	if (!tokenBudget.ok || !timeBudgetSeconds.ok || !minTokensBeforeWrapUp.ok || !minTimeSecondsBeforeWrapUp.ok) return null;
+	return { goalId, objective, status, tokenBudget: tokenBudget.value, timeBudgetSeconds: timeBudgetSeconds.value, minTokensBeforeWrapUp: minTokensBeforeWrapUp.value, minTimeSecondsBeforeWrapUp: minTimeSecondsBeforeWrapUp.value, tokensUsed, timeUsedSeconds, createdAt, updatedAt };
 }
 
-function optionalPositiveInteger(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+function isGoalEventKind(kind: unknown): boolean {
+	return kind === "set" || kind === "update" || kind === "account" || kind === "telemetry" || kind === "clear";
+}
+
+function isGoalEventReason(reason: unknown): boolean {
+	return reason === "command" || reason === "tool" || reason === "turn" || reason === "budget" || reason === "abort" || reason === "resume" || reason === "reload" || reason === "continuation" || reason === "safety" || reason === "floor";
+}
+
+function goalStatus(value: unknown): GoalState["status"] | undefined {
+	if (value === "active" || value === "paused" || value === "budgetLimited" || value === "complete") return value;
+	return undefined;
+}
+
+function requiredString(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function finiteTimestamp(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function optionalPositiveIntegerField(value: unknown): { ok: true; value: number | undefined } | { ok: false } {
+	if (value === undefined) return { ok: true, value: undefined };
+	return typeof value === "number" && Number.isInteger(value) && value > 0 ? { ok: true, value } : { ok: false };
 }
