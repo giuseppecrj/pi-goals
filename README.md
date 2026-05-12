@@ -24,16 +24,54 @@ Bounded reusable prompt discovery keeps `/goal` autocomplete responsive in large
 
 ## Install
 
-Install globally for your Pi environment:
+Prerequisite: install and authenticate [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) first.
+
+```bash
+npm install -g @earendil-works/pi-coding-agent
+pi
+```
+
+> Security: Pi packages run extension code with full system access. Review package source before installing third-party packages.
+
+Install `pi-goals` globally for your Pi user:
 
 ```bash
 pi install npm:@atlas.labs/pi-goal
 ```
 
-Install project-locally:
+Or install it project-locally so the package is recorded in `.pi/settings.json` for that workspace:
 
 ```bash
 pi install -l npm:@atlas.labs/pi-goal
+```
+
+Try it for one Pi run without saving it to settings:
+
+```bash
+pi -e npm:@atlas.labs/pi-goal
+```
+
+After installation, start or restart Pi in your workspace and run:
+
+```text
+/goal
+/goal write a short project status summary
+```
+
+Package management:
+
+```bash
+pi list
+pi update npm:@atlas.labs/pi-goal
+pi remove npm:@atlas.labs/pi-goal
+```
+
+For local package development from this repository:
+
+```bash
+npm install
+pi install -l .
+npm run quality:goal
 ```
 
 ## Suggested AGENTS.md
@@ -217,7 +255,7 @@ A useful pattern is to queue the lifecycle: propose the change, apply it, then a
 
 ### Hardened template command policy
 
-This hardened copy disables inline template shell commands by default, even when a template says `allow_commands: true`. To opt in, set `PI_GOALS_TEMPLATE_COMMANDS` before running Pi:
+`pi-goals` disables inline template shell commands by default, even when a template says `allow_commands: true`. To opt in, set `PI_GOALS_TEMPLATE_COMMANDS` before running Pi:
 
 ```bash
 # Default: inline !`command` snippets are blocked
