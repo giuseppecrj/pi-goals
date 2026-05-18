@@ -171,7 +171,7 @@ type QueuedObjectiveResolution = { ok: true; objective: string } | { ok: false; 
 
 function resolveQueuedObjective(goal: QueuedGoal): QueuedObjectiveResolution {
 	if (!goal.template) return { ok: true, objective: goal.objective };
-	const resolved = resolveGoalTemplateByName(goal.template, goal.templateFlags ?? {}, goal.templateArgs ?? "");
+	const resolved = resolveGoalTemplateByName(goal.template, goal.templateFlags ?? {}, goal.templateArgs ?? "", process.cwd(), { commandPolicy: goal.templateCommandPolicy });
 	if (!resolved.ok) return "notTemplate" in resolved ? { ok: false, error: `Unknown goal template '${goal.template}'.` } : { ok: false, error: resolved.error };
 	return { ok: true, objective: resolved.template.objective };
 }

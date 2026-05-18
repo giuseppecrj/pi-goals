@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { QUEUE_STATE_ENTRY_TYPE } from "./constants";
+import type { TemplateCommandPolicy } from "./templates";
 
 export type QueuedGoal = {
 	queueId: string;
@@ -12,6 +13,7 @@ export type QueuedGoal = {
 	template?: string;
 	templateFlags?: Record<string, string>;
 	templateArgs?: string;
+	templateCommandPolicy?: TemplateCommandPolicy;
 	createdAt: number;
 };
 
@@ -63,7 +65,7 @@ export function getQueue(): QueuedGoal[] {
 	return runtimeQueue.slice();
 }
 
-export function enqueueGoal(objective: string, source: "command" | "tool", opts?: { tokenBudget?: number; timeBudgetSeconds?: number; minTokensBeforeWrapUp?: number; minTimeSecondsBeforeWrapUp?: number; template?: string; templateFlags?: Record<string, string>; templateArgs?: string }): QueuedGoal {
+export function enqueueGoal(objective: string, source: "command" | "tool", opts?: { tokenBudget?: number; timeBudgetSeconds?: number; minTokensBeforeWrapUp?: number; minTimeSecondsBeforeWrapUp?: number; template?: string; templateFlags?: Record<string, string>; templateArgs?: string; templateCommandPolicy?: TemplateCommandPolicy }): QueuedGoal {
 	const goal: QueuedGoal = {
 		queueId: generateQueueId(),
 		objective,
@@ -75,6 +77,7 @@ export function enqueueGoal(objective: string, source: "command" | "tool", opts?
 		template: opts?.template,
 		templateFlags: opts?.templateFlags,
 		templateArgs: opts?.templateArgs,
+		templateCommandPolicy: opts?.templateCommandPolicy,
 		createdAt: Date.now(),
 	};
 	runtimeQueue.push(goal);
@@ -200,6 +203,8 @@ function toQueuedGoal(value: unknown): QueuedGoal | null {
 	if (!template.ok) return null;
 	const templateArgs = parseOptionalStringField(raw.templateArgs);
 	if (!templateArgs.ok) return null;
+	const templateCommandPolicy = parseOptionalTemplateCommandPolicyField(raw.templateCommandPolicy);
+	if (!templateCommandPolicy.ok) return null;
 
 	return {
 		queueId,
@@ -212,6 +217,7 @@ function toQueuedGoal(value: unknown): QueuedGoal | null {
 		template: template.value,
 		templateFlags: templateFlags.value,
 		templateArgs: templateArgs.value,
+		templateCommandPolicy: templateCommandPolicy.value,
 		createdAt,
 	};
 }
@@ -237,6 +243,12 @@ function parseOptionalStringField(value: unknown): ParsedOptionalField<string> {
 	if (value === undefined) return { ok: true, value: undefined };
 	if (typeof value !== "string") return { ok: false };
 	return { ok: true, value };
+}
+
+function parseOptionalTemplateCommandPolicyField(value: unknown): ParsedOptionalField<TemplateCommandPolicy> {
+	if (value === undefined) return { ok: true, value: undefined };
+	if (value === "off" || value === "allowlist" || value === "on") return { ok: true, value };
+	return { ok: false };
 }
 
 function toRequiredString(value: unknown): string | undefined {

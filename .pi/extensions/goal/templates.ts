@@ -11,7 +11,11 @@ const ALLOWLISTED_COMMANDS = ["git"];
 const SHELL_CHAIN_META_PATTERN = /[;&|`$<>\\\n\r]/;
 const GIT_UNSAFE_ARG_PATTERN = /^(?:-c|--config(?:=.*)?|--exec-path(?:=.*)?|--upload-pack(?:=.*)?|--receive-pack(?:=.*)?|--git-dir(?:=.*)?|--work-tree(?:=.*)?)$/;
 
-type TemplateCommandPolicy = "off" | "allowlist" | "on";
+export type TemplateCommandPolicy = "off" | "allowlist" | "on";
+
+export type GoalTemplateResolutionOptions = {
+	commandPolicy?: TemplateCommandPolicy;
+};
 
 export type GoalTemplate = {
 	name: string;
@@ -41,6 +45,7 @@ export type ResolvedGoalTemplate = {
 	objective: string;
 	flags: Record<string, string>;
 	args: string;
+	commandPolicy?: TemplateCommandPolicy;
 };
 
 export type TemplateResolution = { ok: true; template: ResolvedGoalTemplate } | { ok: false; error: string } | { ok: false; notTemplate: true };
@@ -49,7 +54,17 @@ type ParsedInvocation = {
 	name: string;
 	flags: Record<string, string>;
 	args: string;
+	commandPolicy?: TemplateCommandPolicy;
+	flagError?: string;
 };
+
+type ParsedFlags = {
+	values: Record<string, string>;
+	commandPolicy?: TemplateCommandPolicy;
+	error?: string;
+};
+
+type TemplateCommandPolicyParseResult = { ok: true; value: TemplateCommandPolicy } | { ok: false; error: string };
 
 type Frontmatter = Record<string, string>;
 
@@ -76,28 +91,35 @@ export function listGoalTemplateMetadata(root = process.cwd()): GoalTemplateMeta
 	});
 }
 
-export function resolveGoalTemplateInvocation(input: string, root = process.cwd()): TemplateResolution {
+export function resolveGoalTemplateInvocation(input: string, root = process.cwd(), options: GoalTemplateResolutionOptions = {}): TemplateResolution {
 	const parsed = parseInvocation(input);
 	if (!parsed) return { ok: false, notTemplate: true };
-	return resolveGoalTemplateByName(parsed.name, parsed.flags, parsed.args, root);
+	if (parsed.flagError) return { ok: false, error: parsed.flagError };
+	return resolveGoalTemplateByName(parsed.name, parsed.flags, parsed.args, root, { commandPolicy: parsed.commandPolicy ?? options.commandPolicy });
 }
 
-export function resolveGoalTemplateInvocationArgs(nameOrAlias: string, invocationArgs = "", flags: Record<string, string> = {}, root = process.cwd()): TemplateResolution {
+export function resolveGoalTemplateInvocationArgs(nameOrAlias: string, invocationArgs = "", flags: Record<string, string> = {}, root = process.cwd(), options: GoalTemplateResolutionOptions = {}): TemplateResolution {
 	const parsed = parseInvocation(`${nameOrAlias}${invocationArgs.trim() ? ` ${invocationArgs.trim()}` : ""}`);
 	if (!parsed) return { ok: false, notTemplate: true };
-	return resolveGoalTemplateByName(parsed.name, { ...parsed.flags, ...flags }, parsed.args, root);
+	if (parsed.flagError) return { ok: false, error: parsed.flagError };
+	const parsedFlags = extractTemplateCommandPolicyFromFlags(flags);
+	if (parsedFlags.error) return { ok: false, error: parsedFlags.error };
+	return resolveGoalTemplateByName(parsed.name, { ...parsed.flags, ...parsedFlags.values }, parsed.args, root, { commandPolicy: parsed.commandPolicy ?? parsedFlags.commandPolicy ?? options.commandPolicy });
 }
 
-export function resolveGoalTemplateByName(nameOrAlias: string, flags: Record<string, string>, args = "", root = process.cwd()): TemplateResolution {
+export function resolveGoalTemplateByName(nameOrAlias: string, flags: Record<string, string>, args = "", root = process.cwd(), options: GoalTemplateResolutionOptions = {}): TemplateResolution {
 	const matches = findTemplates(nameOrAlias, root);
 	if (matches.length === 0) return { ok: false, notTemplate: true };
 	if (matches.length > 1) return { ok: false, error: `Ambiguous goal template '${nameOrAlias}' matches: ${matches.map((template) => template.name).join(", ")}.` };
+	const parsedFlags = extractTemplateCommandPolicyFromFlags(flags);
+	if (parsedFlags.error) return { ok: false, error: parsedFlags.error };
+	const commandPolicy = parsedFlags.commandPolicy ?? options.commandPolicy;
 	const template = matches[0];
 	try {
-		const values = { ...flags, args };
+		const values = { ...parsedFlags.values, args };
 		const interpolated = interpolate(template.body, values);
-		const objective = resolveInlineCommands(interpolated, template, root).trim();
-		return { ok: true, template: { name: template.name, path: template.path, objective, flags: { ...flags }, args } };
+		const objective = resolveInlineCommands(interpolated, template, root, commandPolicy).trim();
+		return { ok: true, template: { name: template.name, path: template.path, objective, flags: { ...parsedFlags.values }, args, commandPolicy } };
 	} catch (error) {
 		return { ok: false, error: error instanceof Error ? error.message : String(error) };
 	}
@@ -187,24 +209,61 @@ function parseInvocation(input: string): ParsedInvocation | undefined {
 			rest = rest.slice(0, delimiter).trim();
 		}
 	}
-	return { name, flags: parseFlags(rest), args };
+	const parsedFlags = parseFlags(rest);
+	return { name, flags: parsedFlags.values, args, commandPolicy: parsedFlags.commandPolicy, flagError: parsedFlags.error };
 }
 
-function parseFlags(input: string): Record<string, string> {
+function parseFlags(input: string): ParsedFlags {
 	const values: Record<string, string> = {};
+	let commandPolicy: TemplateCommandPolicy | undefined;
+	let error: string | undefined;
 	const tokens = input.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
 	for (let i = 0; i < tokens.length; i++) {
 		const token = unquote(tokens[i]);
 		if (!token.startsWith("--")) continue;
 		const eq = token.indexOf("=");
-		if (eq > 2) {
-			values[token.slice(2, eq)] = token.slice(eq + 1);
+		const key = eq > 2 ? token.slice(2, eq) : token.slice(2);
+		const rawValue = eq > 2 ? token.slice(eq + 1) : tokens[i + 1] && !tokens[i + 1].startsWith("--") ? unquote(tokens[++i]) : undefined;
+		const policy = parseTemplateCommandPolicyFlag(key, rawValue);
+		if (policy) {
+			if (!policy.ok) error = policy.error;
+			else commandPolicy = policy.value;
 			continue;
 		}
-		const next = tokens[i + 1] && !tokens[i + 1].startsWith("--") ? unquote(tokens[++i]) : "true";
-		values[token.slice(2)] = next;
+		values[key] = rawValue ?? "true";
 	}
-	return values;
+	return { values, commandPolicy, error };
+}
+
+function extractTemplateCommandPolicyFromFlags(flags: Record<string, string>): ParsedFlags {
+	const values: Record<string, string> = {};
+	let commandPolicy: TemplateCommandPolicy | undefined;
+	let error: string | undefined;
+	for (const [key, value] of Object.entries(flags)) {
+		const policy = parseTemplateCommandPolicyFlag(key, value);
+		if (policy) {
+			if (!policy.ok) error = policy.error;
+			else commandPolicy = policy.value;
+			continue;
+		}
+		values[key] = value;
+	}
+	return { values, commandPolicy, error };
+}
+
+function parseTemplateCommandPolicyFlag(flag: string, value?: string): TemplateCommandPolicyParseResult | undefined {
+	if (flag === "no-template-commands") return { ok: true, value: "off" };
+	if (flag === "allow-template-commands") return parseTemplateCommandPolicyValue(flag, value ?? "on");
+	if (flag === "template-commands" || flag === "template-command-policy") return parseTemplateCommandPolicyValue(flag, value ?? "on");
+	return undefined;
+}
+
+function parseTemplateCommandPolicyValue(flag: string, value: string): TemplateCommandPolicyParseResult {
+	const normalized = value.trim().toLowerCase();
+	if (normalized === "on" || normalized === "true") return { ok: true, value: "on" };
+	if (normalized === "allowlist") return { ok: true, value: "allowlist" };
+	if (normalized === "off" || normalized === "false") return { ok: true, value: "off" };
+	return { ok: false, error: `Invalid value '${value}' for --${flag}. Use on, allowlist, or off.` };
 }
 
 function interpolate(text: string, values: Record<string, string>): string {
@@ -235,19 +294,20 @@ function findRequiredPlaceholders(text: string): string[] {
 		.sort();
 }
 
-function resolveInlineCommands(text: string, template: GoalTemplate, cwd: string): string {
+function resolveInlineCommands(text: string, template: GoalTemplate, cwd: string, commandPolicyOverride?: TemplateCommandPolicy): string {
 	return text.replace(/!`([^`]+)`/g, (_match, command: string) => {
 		if (!template.allowCommands) throw new Error(`Template ${template.name} uses inline commands but allow_commands is not true.`);
-		const policy = templateCommandPolicy();
+		const policy = templateCommandPolicy(commandPolicyOverride);
 		if (policy === "off") {
-			throw new Error(`Template ${template.name} uses inline commands but template command execution is disabled. Set ${TEMPLATE_COMMAND_POLICY_ENV}=allowlist or ${TEMPLATE_COMMAND_POLICY_ENV}=on to opt in.`);
+			throw new Error(`Template ${template.name} uses inline commands but template command execution is disabled. Pass --template-commands=allowlist or --template-commands=on before template args, or set ${TEMPLATE_COMMAND_POLICY_ENV}=allowlist or ${TEMPLATE_COMMAND_POLICY_ENV}=on, to opt in.`);
 		}
 		if (policy === "allowlist") validateAllowlistedCommand(command, template.name);
-		return runCommand(command, template, cwd);
+		return runCommand(command, template, cwd, policy);
 	});
 }
 
-function templateCommandPolicy(): TemplateCommandPolicy {
+function templateCommandPolicy(override?: TemplateCommandPolicy): TemplateCommandPolicy {
+	if (override) return override;
 	const value = process.env[TEMPLATE_COMMAND_POLICY_ENV];
 	return value === "allowlist" || value === "on" || value === "off" ? value : DEFAULT_TEMPLATE_COMMAND_POLICY;
 }
@@ -308,8 +368,7 @@ function splitCommandTokens(input: string, templateName: string): string[] {
 	return tokens;
 }
 
-function runCommand(command: string, template: GoalTemplate, cwd: string): string {
-	const policy = templateCommandPolicy();
+function runCommand(command: string, template: GoalTemplate, cwd: string, policy: TemplateCommandPolicy): string {
 	const executable = policy === "allowlist" ? parseAllowlistedCommand(command, template.name) : undefined;
 	try {
 		const output = executable

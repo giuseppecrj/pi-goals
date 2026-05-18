@@ -29,9 +29,11 @@ Rules:
 
 ## Goal template routing
 
-Reusable goal templates live in workspace-root `.pi-goals/`. The package examples live in `examples/pi-goals/` for users to copy/adapt.
+Reusable goal templates live in workspace-root `.pi-goals/`. The package examples live in `examples/pi-goals/` for users to import with `/goal templates copy <name>` or manually copy/adapt.
 
 When handling queued pi-goal prose, treat `.pi-goals/*` as reusable workflows. Before `start_queued_goal` for an abstract/task-type queue item, call `list_goal_templates` and match by name, aliases, description, and placeholders. If exactly one template fits and inputs are available, use `create_goal_from_template`; dequeue the prose item only after that concrete goal is satisfied. Use `start_queued_goal` only for direct one-off goals.
+
+Inline template commands are disabled by default. For reviewed templates that need inline commands, pass `/goal <template> --template-commands=allowlist -- ...` for allowlisted commands or `/goal <template> --template-commands=on -- ...` only when shell features are required and trusted.
 
 Never discard queued work. Do not call `dequeue_goal` unless the queue head is actually satisfied or the user explicitly authorizes removing that specific queued item. If uncertain, leave it queued and report the blocker.
 

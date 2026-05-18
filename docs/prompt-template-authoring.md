@@ -4,7 +4,7 @@ This guide is for project-local reusable goal templates in `.pi-goals/*.md`.
 
 These templates are consumed by the `pi-goal` extension, not Pi's built-in `.pi/prompts` slash templates. They use frontmatter plus `{{placeholder}}` interpolation, and may optionally run inline read-only shell commands during goal creation.
 
-The package ships examples under `examples/pi-goals/` for reading and adaptation only. Pi-goals discovers templates from workspace-root `.pi-goals/`, so copy any example `.md` file you want to use into `.pi-goals/`. If the example calls `.pi-goals/scripts/...`, also copy the matching helper from `examples/pi-goals/scripts/` into `.pi-goals/scripts/`.
+The package ships examples under `examples/pi-goals/` for reading and adaptation only. Pi-goals discovers templates from workspace-root `.pi-goals/`; bundled examples are not runtime templates until imported or copied there. Use `/goal templates list` and `/goal templates copy <template-name-or-alias>` to import one bundled example into `.pi-goals/` with matching `.pi-goals/scripts/...` helpers, or manually copy/adapt the `.md` file and any helper scripts when you want to customize paths before use.
 
 ## General workflow
 
@@ -12,7 +12,7 @@ The package ships examples under `examples/pi-goals/` for reading and adaptation
 2. Read this guide before authoring or revising the template.
 3. Inspect nearby templates in `.pi-goals/` for style and existing reusable workflows.
 4. Before writing the template, review the source resources that define the exact semantics you plan to encode. Do not invent command flags, placeholder behavior, queue behavior, or Solo/TLO orchestration rules from memory.
-5. Create or update the template in `.pi-goals/`.
+5. Create or update the template in `.pi-goals/`; for bundled examples, import a starting point with `/goal templates copy <template-name-or-alias>` if appropriate.
 6. Validate discovery with `list_goal_templates` or an equivalent dry check.
 7. Run a resolver smoke test for any new or changed template that has placeholders or inline commands, using representative safe arguments.
 8. If the template uses inline commands, verify those commands are read-only and deterministic.
@@ -24,6 +24,7 @@ Reusable goal templates should directly encode exact project/tool knowledge when
 ### Pi-goal template mechanics
 
 - `.pi/extensions/goal/templates.ts` — Source of truth for project-local template parsing. Use it to verify frontmatter keys, alias parsing, `{{placeholder}}` interpolation, `{{args}}` handling, `--flag value` parsing, inline `!` command syntax, command timeout/output limits, and command execution behavior.
+- `.pi/extensions/goal/template-library.ts` — Source of truth for listing and explicitly copying bundled `examples/pi-goals/` templates into project-local `.pi-goals/`. Use it to verify import behavior, overwrite protection, and helper script copying.
 - `~/dev/_state/personal/npm-tools/pi/lib/node_modules/@earendil-works/pi-coding-agent/docs/prompt-templates.md` — Pi's built-in prompt-template documentation. Use it for broader prompt-template concepts and to avoid confusing Pi core prompt templates with this repo's `.pi-goals/` reusable goal templates.
 - `examples/pi-goals/create-issue-doc.md` — Good example of a structured reusable goal prompt with required named placeholders, trailing `{{args}}`, explicit workflow requirements, visible artifacts, and completion standards.
 - `examples/pi-goals/deslop-commit-range.md` — Good example of a focused code-quality workflow template with embedded repo snapshots, validation gates, scope constraints, and a behavior-preserving completion standard.
@@ -70,6 +71,7 @@ Guidelines:
 - `aliases` should be short and stable; avoid aliases that collide semantically with existing templates.
 - `usage` and `examples` should show the intended `/goal` invocation exactly.
 - Use `allow_commands: true` only when the body contains inline `!` command blocks.
+- Inline commands are disabled by default at resolution time; invoke reviewed templates with `/goal <template> --template-commands=allowlist -- ...` for allowlisted commands or `/goal <template> --template-commands=on -- ...` when the template needs shell features.
 - Set `command_timeout_ms` and `command_output_limit` when inline commands may call local tools or produce non-trivial output.
 
 ## Placeholders and arguments
@@ -101,7 +103,7 @@ Why:
 Recommended implementation:
 
 - Keep the issue selector in trailing `{{args}}`.
-- Use `allow_commands: true` with a read-only generic resolver script when selector parsing is non-trivial. When copying the bundled examples, copy `examples/pi-goals/scripts/resolve_issue_docs.py` to `.pi-goals/scripts/resolve_issue_docs.py` or adapt the template command to your helper path.
+- Use `allow_commands: true` with a read-only generic resolver script when selector parsing is non-trivial. When importing bundled examples with `/goal templates copy`, matching helpers such as `examples/pi-goals/scripts/resolve_issue_docs.py` are copied to `.pi-goals/scripts/resolve_issue_docs.py`; when copying manually, copy the helper yourself or adapt the template command to your helper path.
 - Pass `{{args}}` through a quoted heredoc such as `ISSUE_SELECTOR=$(cat <<'PI_GOAL_ISSUE_SELECTOR' ... )`.
 - Resolve issue docs by scanning the repo's issue buckets, not by hard-coding paths.
 - Support common forms: `ISSUE-026`, `issue 026`, `26`, `26-28`, `026..028`, `issue 026 through 028`, and comma-separated lists.
@@ -113,7 +115,7 @@ Recommended implementation:
 
 Reference and boundary:
 
-- `examples/pi-goals/execute-issue-stack.md` passes `{{args}}` to `examples/pi-goals/scripts/render_issue_stack_prompt.py` and renders a whole prompt. To use it from `.pi-goals/`, copy `examples/pi-goals/scripts/render_issue_stack_prompt.py` to `.pi-goals/scripts/render_issue_stack_prompt.py` or update the command path.
+- `examples/pi-goals/execute-issue-stack.md` passes `{{args}}` to `examples/pi-goals/scripts/render_issue_stack_prompt.py` and renders a whole prompt. To use it from `.pi-goals/`, import it with `/goal templates copy execute-issue-stack`, manually copy `examples/pi-goals/scripts/render_issue_stack_prompt.py` to `.pi-goals/scripts/render_issue_stack_prompt.py`, or update the command path.
 - Treat that as an exceptional legacy/special-case pattern, not the default.
 - Prefer focused generic resolver scripts with one responsibility, interleaved into normal Markdown templates through inline command blocks.
 - Let templates pass workflow-specific parameters to the generic resolver through environment variables, such as artifact root, artifact field name, stack prefix, bucket list, or available-issue limit.

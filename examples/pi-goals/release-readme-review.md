@@ -1,8 +1,8 @@
 ---
 description: Review README before a release against changes since the last release and propose useful documentation updates
 aliases: readme-release-review,release-readme,readme-release
-usage: /goal release-readme-review -- v0.1.1..HEAD
-examples: /goal readme-release-review -- v0.1.1..HEAD; /goal release-readme -- upcoming npm release
+usage: /goal release-readme-review --template-commands=on -- v0.1.1..HEAD
+examples: /goal readme-release-review --template-commands=on -- v0.1.1..HEAD; /goal release-readme --template-commands=on -- upcoming npm release
 allow_commands: true
 command_timeout_ms: 10000
 command_output_limit: 30000

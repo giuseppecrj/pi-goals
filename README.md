@@ -231,11 +231,29 @@ Template features:
 
 Reusable templates are available to both slash commands and natural-language agent workflows. Agents can discover available templates, fill in required values from your request, and create a concrete goal from the resolved prompt. Template invocations also work through `/goal queue`.
 
+Bundled examples under `examples/pi-goals/` are not auto-discovered as runtime templates. To import one into the current project, use:
+
+```text
+/goal templates list
+/goal templates copy <template-name-or-alias>
+/goal templates copy <template-name-or-alias> --force
+```
+
+`/goal templates copy` writes the selected example into workspace-root `.pi-goals/`. If the example references `.pi-goals/scripts/...`, matching bundled helpers are copied into `.pi-goals/scripts/` too. Existing project files are protected unless `--force` is passed; manual copy/adapt remains supported when you want to customize paths before use.
+
 ### Optional OpenSpec workflow templates
 
 `pi-goals` pairs well with [OpenSpec](https://github.com/open-spec/openspec)-style change workflows: OpenSpec remains the source of truth for proposal/design/spec/tasks/archive state, while `pi-goals` provides the persistent execution contract, queueing, budgets, and completion discipline.
 
-This package does not require OpenSpec at runtime. If your project uses OpenSpec, copy/adapt these example templates into workspace-root `.pi-goals/`:
+This package does not require OpenSpec at runtime. If your project uses OpenSpec, import the bundled examples:
+
+```text
+/goal templates copy openspec-propose
+/goal templates copy openspec-apply-change
+/goal templates copy openspec-archive-change
+```
+
+Or manually copy/adapt them into workspace-root `.pi-goals/`:
 
 ```text
 examples/pi-goals/openspec-propose.md        -> .pi-goals/openspec-propose.md
@@ -255,7 +273,20 @@ A useful pattern is to queue the lifecycle: propose the change, apply it, then a
 
 ### Hardened template command policy
 
-`pi-goals` disables inline template shell commands by default, even when a template says `allow_commands: true`. To opt in, set `PI_GOALS_TEMPLATE_COMMANDS` before running Pi:
+`pi-goals` disables inline template shell commands by default, even when a template says `allow_commands: true`. For one invocation, pass the command policy before the trailing ` -- ` args:
+
+```text
+# Allow only simple allowlisted commands such as git with no shell metacharacters
+/goal <template> --template-commands=allowlist -- optional args
+
+# Compatibility mode: run allow_commands templates through the shell
+/goal <template> --template-commands=on -- optional args
+
+# Shorthand for --template-commands=on
+/goal <template> --allow-template-commands -- optional args
+```
+
+You can also set `PI_GOALS_TEMPLATE_COMMANDS` before running Pi when you want a process-wide default:
 
 ```bash
 # Default: inline !`command` snippets are blocked
@@ -264,7 +295,7 @@ PI_GOALS_TEMPLATE_COMMANDS=off
 # Allow only simple allowlisted commands such as git with no shell metacharacters
 PI_GOALS_TEMPLATE_COMMANDS=allowlist
 
-# Compatibility mode: run allow_commands templates as the original project did
+# Compatibility mode: run allow_commands templates through the shell
 PI_GOALS_TEMPLATE_COMMANDS=on
 ```
 
@@ -286,7 +317,7 @@ The churn monitor still runs with no tools, no extensions, no skills, and no pro
 
 This repository is both the source for the `pi-goals` Pi extension and a working reference for reusable goal workflows. The source repo intentionally includes:
 
-- reusable goal template examples in [`examples/pi-goals/`](examples/pi-goals/), including release review, issue workflow, queue-stack, and deslop examples. Copy/adapt these into `.pi-goals/`; templates that use helper scripts also need their matching `examples/pi-goals/scripts/` files copied to `.pi-goals/scripts/`;
+- reusable goal template examples in [`examples/pi-goals/`](examples/pi-goals/), including release review, issue workflow, queue-stack, and deslop examples. Import one with `/goal templates copy <name>` or copy/adapt it into `.pi-goals/`; templates that use helper scripts have matching `examples/pi-goals/scripts/` files that `/goal templates copy` imports automatically;
 - a [prompt template authoring guide](docs/prompt-template-authoring.md) for creating strong project-local goal templates.
 
 If you want to build your own reusable goal workflows, point your agent at the authoring guide and nearby templates, then ask it to adapt the patterns to your project rather than copying them blindly.

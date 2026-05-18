@@ -3,7 +3,8 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { GOAL_USAGE, GOAL_USAGE_HINT } from "./constants";
 import { canActivateGoal, budgetLimitReason } from "./budget";
 import { validateObjective, goalStatusLabel } from "./format";
-import { discoverGoalTemplates, resolveGoalTemplateInvocation } from "./templates";
+import { discoverGoalTemplates, resolveGoalTemplateInvocation, type TemplateCommandPolicy } from "./templates";
+import { copyBundledGoalTemplate, discoverBundledGoalTemplates, listBundledGoalTemplateMetadata } from "./template-library";
 import { createTelemetry, resetSafetyCounters } from "./telemetry";
 import {
 	createGoalState,
@@ -20,7 +21,7 @@ import { notifyGoal, notifyInfo, notifyWarning, showGoalSummary, showNoGoal, syn
 import type { GoalCommandScheduler, GoalContinuationCanceller, GoalMonitorCanceller, GoalMonitorScheduler, GoalPauseInterrupter, GoalQueueSteeringSender, GoalState } from "./types";
 
 type GoalSubcommand = {
-	name: "pause" | "resume" | "clear" | "queue";
+	name: "pause" | "resume" | "clear" | "queue" | "templates";
 	description: string;
 };
 
@@ -29,6 +30,7 @@ const GOAL_SUBCOMMANDS: GoalSubcommand[] = [
 	{ name: "resume", description: "Resume a paused goal" },
 	{ name: "clear", description: "Clear the current goal" },
 	{ name: "queue", description: "List queued goals or enqueue a new goal" },
+	{ name: "templates", description: "List or copy bundled goal templates into this project" },
 ];
 
 export function registerGoalCommand(
@@ -49,7 +51,8 @@ export function registerGoalCommand(
 
 export function goalArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
 	const query = argumentPrefix.trimStart();
-	if (/^queue\s/.test(query)) return templateCompletions(query.slice("queue".length).trimStart(), "queue ");
+	if (/^queue\s/.test(query)) return runtimeTemplateCompletions(query.slice("queue".length).trimStart(), "queue ");
+	if (/^templates(?:\s|$)/.test(query)) return bundledTemplateCommandCompletions(query.slice("templates".length).trimStart());
 	if (/\s/.test(query)) return null;
 	const scored = GOAL_SUBCOMMANDS.map((subcommand) => ({
 		...subcommand,
@@ -57,15 +60,36 @@ export function goalArgumentCompletions(argumentPrefix: string): AutocompleteIte
 	})).filter((item): item is GoalSubcommand & { score: number } => item.score !== undefined);
 	scored.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
 	const subcommands = scored.map(({ name, description }) => ({ value: name, label: name, description }));
-	return [...subcommands, ...templateCompletions(query)];
+	return [...subcommands, ...runtimeTemplateCompletions(query)];
 }
 
-function templateCompletions(query: string, valuePrefix = ""): AutocompleteItem[] {
+function runtimeTemplateCompletions(query: string, valuePrefix = ""): AutocompleteItem[] {
 	if (/\s/.test(query)) return [];
 	return discoverGoalTemplates()
 		.filter((template) => template.name.toLowerCase().includes(query.toLowerCase()) || template.aliases.some((alias) => alias.toLowerCase().includes(query.toLowerCase())))
 		.slice(0, 20)
 		.map((template) => ({ value: `${valuePrefix}${template.name}`, label: template.name, description: template.description ?? `Goal template from ${template.path}` }));
+}
+
+function bundledTemplateCommandCompletions(query: string): AutocompleteItem[] {
+	const trimmed = query.trimStart();
+	if (!trimmed || !/\s/.test(trimmed)) return templateLibraryActionCompletions(trimmed);
+	const copyMatch = trimmed.match(/^copy\s+(\S*)$/);
+	if (!copyMatch) return [];
+	const templateQuery = copyMatch[1].toLowerCase();
+	return discoverBundledGoalTemplates()
+		.filter((template) => template.name.toLowerCase().includes(templateQuery) || template.aliases.some((alias) => alias.toLowerCase().includes(templateQuery)))
+		.slice(0, 20)
+		.map((template) => ({ value: `templates copy ${template.name}`, label: template.name, description: template.description ?? `Bundled template from ${template.relativePath}` }));
+}
+
+function templateLibraryActionCompletions(query: string): AutocompleteItem[] {
+	const actions = [
+		{ value: "templates list", label: "list", description: "List bundled goal templates available to copy" },
+		{ value: "templates copy", label: "copy", description: "Copy a bundled goal template into .pi-goals/" },
+	];
+	const normalized = query.toLowerCase();
+	return actions.filter((action) => action.label.startsWith(normalized));
 }
 
 function subcommandScore(value: string, query: string): number | undefined {
@@ -127,6 +151,10 @@ function handleGoalControlCommand(
 		handleQueueCommand(pi, trimmed, ctx);
 		return true;
 	}
+	if (firstToken === "templates") {
+		handleTemplateLibraryCommand(trimmed, ctx);
+		return true;
+	}
 	if (trimmed === "pause") pauseGoal(pi, ctx, cancelContinuation, interruptActiveTurn, cancelMonitor);
 	else if (trimmed === "resume") resumeGoal(pi, ctx, scheduleContinuation, scheduleMonitor, sendQueueSteering);
 	else if (trimmed === "clear") clearGoal(pi, ctx, cancelContinuation, cancelMonitor, sendQueueSteering);
@@ -139,6 +167,7 @@ type ResolvedObjectiveInput = {
 	template?: string;
 	templateFlags?: Record<string, string>;
 	templateArgs?: string;
+	templateCommandPolicy?: TemplateCommandPolicy;
 };
 
 function resolveTemplateOrObjective(input: string, ctx: ExtensionCommandContext): string {
@@ -153,6 +182,7 @@ function resolveTemplateOrObjectiveDetails(input: string, ctx: ExtensionCommandC
 			template: resolution.template.name,
 			templateFlags: resolution.template.flags,
 			templateArgs: resolution.template.args,
+			templateCommandPolicy: resolution.template.commandPolicy,
 		};
 	}
 	if ("notTemplate" in resolution) return { objective: input };
@@ -283,6 +313,98 @@ function clearGoal(pi: ExtensionAPI, ctx: ExtensionCommandContext, cancelContinu
 	notifyInfo(ctx, hadGoal ? `Goal cleared${queueHint}` : `No goal to clear\nThis session does not currently have a goal.${queueHint}`);
 }
 
+function handleTemplateLibraryCommand(input: string, ctx: ExtensionCommandContext): void {
+	const rest = input.slice("templates".length).trim();
+	if (!rest || rest === "list") {
+		showBundledTemplateList(ctx);
+		return;
+	}
+	const tokens = tokenizeCommandArgs(rest);
+	const action = tokens[0]?.toLowerCase();
+	if (action === "list" && tokens.length === 1) {
+		showBundledTemplateList(ctx);
+		return;
+	}
+	if (action === "copy") {
+		handleTemplateLibraryCopy(tokens.slice(1), ctx);
+		return;
+	}
+	notifyWarning(ctx, templateLibraryUsage());
+}
+
+function showBundledTemplateList(ctx: ExtensionCommandContext): void {
+	const templates = listBundledGoalTemplateMetadata();
+	if (templates.length === 0) {
+		notifyInfo(ctx, "No bundled goal templates available.");
+		return;
+	}
+	const blocks = templates.map((template) => {
+		const status = template.installed ? "installed" : "not installed";
+		const lines = [`${template.name}  [${status}]`];
+		if (template.description) lines.push(`  Description: ${template.description}`);
+		if (template.aliases.length > 0) lines.push(`  Aliases: ${template.aliases.join(", ")}`);
+		if (template.helperScripts.length > 0) {
+			lines.push("  Helpers:");
+			for (const script of template.helperScripts) lines.push(`    - .pi-goals/scripts/${script}`);
+		}
+		lines.push(`  Copy: /goal templates copy ${template.name}`);
+		return lines.join("\n");
+	});
+	notifyInfo(ctx, `Bundled goal templates (${templates.length})\n\n${blocks.join("\n\n")}\n\nUse --force to overwrite existing project files.`);
+}
+
+function handleTemplateLibraryCopy(args: string[], ctx: ExtensionCommandContext): void {
+	const parsed = parseTemplateLibraryCopyArgs(args);
+	if (!parsed.ok) {
+		notifyWarning(ctx, parsed.error);
+		return;
+	}
+	const result = copyBundledGoalTemplate(parsed.template, { force: parsed.force });
+	if (!result.ok) {
+		notifyWarning(ctx, result.error);
+		return;
+	}
+	const files = result.files.map((file) => {
+		const action = file.overwritten ? "overwrote" : "copied";
+		const kind = file.kind === "helper" ? " helper" : "";
+		return `- ${action}${kind}: ${file.relativeDestinationPath}`;
+	});
+	notifyInfo(ctx, `Imported bundled goal template '${result.template.name}':\n${files.join("\n")}\n\nRun:\n  ${result.nextInvocation}`);
+}
+
+type TemplateLibraryCopyArgs = { ok: true; template: string; force: boolean } | { ok: false; error: string };
+
+function parseTemplateLibraryCopyArgs(args: string[]): TemplateLibraryCopyArgs {
+	let template = "";
+	let force = false;
+	for (const arg of args) {
+		if (arg === "--force") {
+			force = true;
+			continue;
+		}
+		if (arg.startsWith("--")) return { ok: false, error: `Unknown /goal templates copy option '${arg}'.\n${templateLibraryUsage()}` };
+		if (!template) {
+			template = arg;
+			continue;
+		}
+		return { ok: false, error: `Unexpected /goal templates copy argument '${arg}'.\n${templateLibraryUsage()}` };
+	}
+	if (!template) return { ok: false, error: `Template name or alias is required.\n${templateLibraryUsage()}` };
+	return { ok: true, template, force };
+}
+
+function templateLibraryUsage(): string {
+	return "Usage:\n/goal templates list\n/goal templates copy <template-name-or-alias> [--force]";
+}
+
+function tokenizeCommandArgs(input: string): string[] {
+	return (input.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map(stripCommandQuotes);
+}
+
+function stripCommandQuotes(value: string): string {
+	return value.replace(/^[\'"]|[\'"]$/g, "");
+}
+
 function handleQueueCommand(pi: ExtensionAPI, input: string, ctx: ExtensionCommandContext): void {
 	const rest = input.slice("queue".length).trim();
 	if (!rest) {
@@ -301,7 +423,7 @@ function handleQueueCommand(pi: ExtensionAPI, input: string, ctx: ExtensionComma
 		const validatedItems = resolveAndValidateQueueItems(blockItems, ctx);
 		if (!validatedItems) return;
 		const queued = validatedItems.map((item) => {
-			const goal = enqueueGoal(item.objective, "command", { template: item.template, templateFlags: item.templateFlags, templateArgs: item.templateArgs });
+			const goal = enqueueGoal(item.objective, "command", { template: item.template, templateFlags: item.templateFlags, templateArgs: item.templateArgs, templateCommandPolicy: item.templateCommandPolicy });
 			persistEnqueue(pi, goal);
 			return goal;
 		});
@@ -317,7 +439,7 @@ function handleQueueCommand(pi: ExtensionAPI, input: string, ctx: ExtensionComma
 		notifyWarning(ctx, validation.hint ? `${validation.message}\n${validation.hint}` : validation.message);
 		return;
 	}
-	const queued = enqueueGoal(validation.objective, "command", { template: resolved.template, templateFlags: resolved.templateFlags, templateArgs: resolved.templateArgs });
+	const queued = enqueueGoal(validation.objective, "command", { template: resolved.template, templateFlags: resolved.templateFlags, templateArgs: resolved.templateArgs, templateCommandPolicy: resolved.templateCommandPolicy });
 	persistEnqueue(pi, queued);
 	notifyInfo(ctx, `Queued goal: ${queued.queueId} \u2014 ${truncateObjective(validation.objective)}`);
 }
